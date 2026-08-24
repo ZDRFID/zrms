@@ -167,6 +167,7 @@ Common errors:
 | `is not digitally signed` | Policy is `RemoteSigned`/`AllSigned` and the file still carries the download mark. Run `Unblock-File`. |
 | `The term '.\Get-VncTargets.ps1' is not recognized` | Wrong folder. `cd` to where the file is; the leading `.\` is required. |
 | Window flashes and closes | Launched by double-clicking the `.ps1`. Use the `.cmd` launcher instead. |
+| `could not find the scanner script next to this launcher` | The `.ps1` isn't in the same folder, or its name changed. Some download paths strip hyphens (`Get-VncTargets.ps1` → `GetVncTargets.ps1`); the launchers match either form, but the file must be alongside the `.cmd`. The error lists what it actually found. |
 
 Only the *server* setup scripts need an elevated prompt. `Get-VncTargets.ps1`
 and `Test-VncOverTailscale.ps1` run as a normal user.
