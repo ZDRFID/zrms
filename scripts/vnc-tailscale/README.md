@@ -1,101 +1,120 @@
 # VNC over Tailscale
 
-Scripts to expose a machine's VNC server to your tailnet — and only to your
-tailnet — so you can connect with RealVNC Viewer from anywhere without port
-forwarding, a VPN concentrator, or a public IP.
+Tooling for reaching a fleet of machines over VNC across a tailnet — no port
+forwarding, no public IPs, nothing exposed to the LAN.
 
-## Which script runs where
+## Scenario A — adding a new client PC (most common)
 
-There are two sides. Run the right script on each.
+The machines already serve VNC and you can already reach them from another
+computer. You just want a **new PC** to reach them too.
 
-| Machine | Role | Script |
-| --- | --- | --- |
-| The one you want to **control** | VNC **server** | `setup-vnc-over-tailscale.sh` (Linux / Raspberry Pi OS) or `Setup-VncOverTailscale.ps1` (Windows) |
-| The one you're **sitting at** | VNC **viewer** | `Test-VncOverTailscale.ps1` — only if the connection fails |
+**Nothing changes on the servers.** Adding a client is entirely local to the
+new PC:
 
-In this tailnet every machine (`mc-hed-t1`, `avida-k1`, `mc-hs-t2`, …) is a
-Raspberry Pi running Raspberry Pi OS, so the **bash** script is the one that
-runs on the target. The PowerShell setup script is only for a Windows target;
-the Windows box here is the viewer.
+1. **Install Tailscale** and sign in with the *same account* the working
+   computer uses. This is the step that actually matters — a different account
+   means a different tailnet and an empty peer list.
+2. **Approve the device** if your tailnet has device approval turned on
+   (admin console → Machines).
+3. **Install VNC Viewer.**
+4. **Connect**: type the machine's MagicDNS name into the search bar and press
+   **Enter**.
 
-Almost every "it won't connect" case is the setup script never having been run
-on the *server* side.
+Then confirm what's reachable:
 
-## Setup — on the machine you want to control
+```powershell
+.\Get-VncTargets.ps1
+```
 
-**Raspberry Pi / Linux**:
+This lists every peer in the tailnet and probes port 5900 on each, so you see
+which machines are VNC-ready in one shot instead of finding out one failed
+connection at a time. `-ReadyOnly` trims it to the working ones.
+
+If something specific won't connect:
+
+```powershell
+.\Test-VncOverTailscale.ps1 -Target mc-hed-t1
+```
+
+It walks the path layer by layer — Tailscale up, peer online, MagicDNS
+resolving, tailnet reachability, TCP 5900 — and names the layer that's broken.
+
+### Bringing your saved connections across
+
+To avoid retyping a dozen addresses, export the address book on the computer
+that already works: **File → Export connections**, copy the resulting file to
+the new PC, then **File → Import connections**. Saved passwords are not
+included — you'll re-enter those once per machine.
+
+### The empty address book is not the problem
+
+*"There are no computers in your address book at present. 0 device(s)"* is
+normal. The address book is a RealVNC cloud feature that requires signing in to
+a RealVNC account. Direct connections over Tailscale don't use it and don't
+need it. Type the address in the search bar and press Enter.
+
+## Scenario B — setting up a new server machine
+
+Only needed for a machine that is **not yet** serving VNC.
+
+| Target OS | Script |
+| --- | --- |
+| Linux / Raspberry Pi OS | `setup-vnc-over-tailscale.sh` (run with `sudo`) |
+| Windows | `Setup-VncOverTailscale.ps1` (run elevated) |
 
 ```bash
 sudo ./setup-vnc-over-tailscale.sh
 ```
-
-**Windows target** (elevated PowerShell):
 
 ```powershell
 .\Setup-VncOverTailscale.ps1              # server already installed
 .\Setup-VncOverTailscale.ps1 -InstallServer   # install RealVNC Server too
 ```
 
-Both scripts are idempotent — re-run them any time to re-check the state.
-Pass `-Remove` / `--remove` to undo the firewall and service changes.
+Both are idempotent — safe to re-run to re-check state. `--remove` / `-Remove`
+undoes the firewall and service changes.
 
-## Connecting
-
-The setup script prints the address to use when it finishes. In VNC Viewer,
-type it into the search bar and press **Enter**:
-
-```
-mc-hed-t1.tail9b9828.ts.net
-100.108.161.21
-```
-
-Either works. The IP is stable per machine and doesn't depend on MagicDNS, so
-it's the better choice if name resolution is ever flaky. Port `5900` is the
-default and can be omitted.
-
-An empty address book — *"There are no computers in your address book at
-present. 0 device(s)"* — is normal and is not the problem. The address book is
-a RealVNC cloud feature; direct connections don't use it and don't require
-signing in.
-
-## When it doesn't work
-
-Run this on the machine you're connecting **from**:
-
-```powershell
-.\Test-VncOverTailscale.ps1 -Target mc-hed-t1
-```
-
-It walks the path one layer at a time — Tailscale up, peer online, MagicDNS
-resolving, tailnet reachability, then the TCP connect to 5900 — and names the
-layer that's broken instead of leaving you to guess.
-
-## What the setup actually does
+What the setup does:
 
 1. **Confirms Tailscale is connected** and reads the machine's tailnet IP.
-2. **Starts the VNC server** (installing one on request) and sets it to run at boot.
+2. **Starts the VNC server** (installing one on request) and enables it at boot.
 3. **Restricts TCP 5900 to `100.64.0.0/10`**, the Tailscale CGNAT range, so
    tailnet peers reach it and the LAN and public internet do not.
    - On Linux this is **one targeted `DROP` rule** for port 5900 only. Default
-     policy is never changed and no other port is touched, so it cannot lock
-     you out of SSH — which matters when the machine is a headless Pi you can
-     only reach remotely. A systemd oneshot re-applies it at boot, since
-     iptables rules don't persist on their own.
+     policy is never changed and no other port is touched, so it cannot lock you
+     out of SSH — which matters on a headless Pi you can only reach remotely. A
+     systemd oneshot re-applies it at boot, since iptables rules don't persist.
    - On X11, `x11vnc` is additionally bound to the Tailscale IP with `-listen`,
      so the port isn't even offered on the LAN interface.
-   - On Windows the rule is created for **all** firewall profiles. Windows
-     classifies the Tailscale adapter as a *Public* network, so a rule scoped
-     to Private only will silently fail.
-4. **Verifies something is listening** on the port and reports what.
+   - On Windows the rule covers **all** firewall profiles. Windows classifies
+     the Tailscale adapter as a *Public* network, so a Private-only rule fails
+     silently.
+4. **Verifies something is listening** and reports what.
+
+### Wayland vs X11 on Raspberry Pi OS
+
+Raspberry Pi OS Bookworm and later default to **Wayland** on the Pi 4 and 5.
+`x11vnc` cannot capture a Wayland session — the most common reason a
+hand-rolled VNC setup on a modern Pi yields a black screen or no listener. The
+script detects the session type with `loginctl` and picks accordingly:
+
+- **Wayland** → enables the built-in `wayvnc` via `raspi-config nonint do_vnc 0`.
+- **X11** → installs `x11vnc` bound to the Tailscale IP.
+
+To force X11: `sudo raspi-config` → Advanced Options → Wayland → X11.
+
+**VNC shares an existing desktop session.** If the machine boots to a console or
+nobody is logged in, there's nothing to share and nothing will listen on 5900.
+Enable `sudo raspi-config` → System Options → Boot / Auto Login → **Desktop
+Autologin**, then reboot.
 
 ## Security notes
 
 - **Tailscale carries the traffic but does not authenticate the VNC session.**
-  It puts the port on a private network; it does not decide who may log in.
-  Set a VNC password. The scripts refuse to pretend otherwise.
-- The firewall scope is the whole CGNAT range, which means *every* device in
-  your tailnet can reach the port. To narrow it to specific machines, use a
-  Tailscale ACL:
+  It puts the port on a private network; it does not decide who may log in. Set
+  a VNC password.
+- The firewall scope is the whole CGNAT range, so every device in your tailnet
+  can reach the port. To narrow it to specific machines, use a Tailscale ACL:
 
   ```json
   {
@@ -106,32 +125,14 @@ layer that's broken instead of leaving you to guess.
   }
   ```
 
-- For an always-on machine, **disable key expiry** in the Tailscale admin
-  console (Machines → the machine → Disable key expiry). Otherwise it drops off
-  the tailnet after ~180 days and you lose remote access with no way to fix it
-  remotely.
-
-## Wayland vs X11 on Raspberry Pi OS
-
-Raspberry Pi OS Bookworm and later default to **Wayland** on the Pi 4 and 5.
-`x11vnc` cannot capture a Wayland session — this is the most common reason a
-hand-rolled VNC setup on a modern Pi produces a black screen or no listener at
-all. The script detects the session type with `loginctl` and picks accordingly:
-
-- **Wayland** → enables the Pi's built-in `wayvnc` via `raspi-config nonint do_vnc 0`.
-  Log in with the machine's own username and password.
-- **X11** → installs `x11vnc` bound to the Tailscale IP.
-
-To force X11 instead: `sudo raspi-config` → Advanced Options → Wayland → X11.
-
-**VNC shares an existing desktop session.** If the Pi boots to a console, or
-nobody is logged in at the physical screen, there is no session to share and
-nothing will listen on 5900. Enable autologin with `sudo raspi-config` →
-System Options → Boot / Auto Login → **Desktop Autologin**, then reboot.
+- For always-on machines, **disable key expiry** in the admin console (Machines
+  → the machine → Disable key expiry). Otherwise they drop off the tailnet after
+  ~180 days and you lose remote access with no remote way to restore it.
 
 ## Requirements
 
-- Tailscale installed and signed in on **both** machines, on the same tailnet.
-- Linux: systemd, plus `raspi-config` (Wayland path) or `apt`/`dnf`/`pacman`
-  (X11 path).
-- Windows: PowerShell 5.1+ as Administrator. `winget` only for `-InstallServer`.
+- Tailscale installed and signed in on **both ends**, on the same tailnet.
+- Client: PowerShell 5.1+ (no admin needed for `Get-VncTargets.ps1` or
+  `Test-VncOverTailscale.ps1`).
+- Server, Linux: systemd, plus `raspi-config` (Wayland) or `apt`/`dnf`/`pacman` (X11).
+- Server, Windows: PowerShell 5.1+ as Administrator. `winget` only for `-InstallServer`.
