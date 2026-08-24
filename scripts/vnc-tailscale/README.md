@@ -20,7 +20,8 @@ new PC:
 4. **Connect**: type the machine's MagicDNS name into the search bar and press
    **Enter**.
 
-Then confirm what's reachable:
+Then confirm what's reachable — **double-click `Scan-VncTargets.cmd`**, or from
+a PowerShell prompt:
 
 ```powershell
 .\Get-VncTargets.ps1
@@ -30,7 +31,8 @@ This lists every peer in the tailnet and probes port 5900 on each, so you see
 which machines are VNC-ready in one shot instead of finding out one failed
 connection at a time. `-ReadyOnly` trims it to the working ones.
 
-If something specific won't connect:
+If something specific won't connect — **double-click `Test-VncConnection.cmd`**
+and enter the machine name, or:
 
 ```powershell
 .\Test-VncOverTailscale.ps1 -Target mc-hed-t1
@@ -128,6 +130,46 @@ Autologin**, then reboot.
 - For always-on machines, **disable key expiry** in the admin console (Machines
   → the machine → Disable key expiry). Otherwise they drop off the tailnet after
   ~180 days and you lose remote access with no remote way to restore it.
+
+## Running the PowerShell scripts on Windows
+
+Windows blocks `.ps1` files by default, so a fresh download won't run on a
+double-click. Three ways around it, easiest first:
+
+**1. Use the `.cmd` launchers.** `Scan-VncTargets.cmd` and
+`Test-VncConnection.cmd` are double-clickable and invoke PowerShell with the
+policy bypassed for that one run. Keep them in the same folder as the `.ps1`
+files. Nothing to configure.
+
+**2. Bypass for a single run:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$HOME\Downloads\Get-VncTargets.ps1"
+```
+
+**3. Allow local scripts for your user, once:**
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+Unblock-File .\*.ps1     # clears the "downloaded from the internet" mark
+.\Get-VncTargets.ps1
+```
+
+`RemoteSigned` still refuses unsigned *downloaded* scripts, which is why
+`Unblock-File` is needed alongside it. This setting is per-user and needs no
+admin rights.
+
+Common errors:
+
+| Message | Cause |
+| --- | --- |
+| `running scripts is disabled on this system` | Execution policy — use any option above. |
+| `is not digitally signed` | Policy is `RemoteSigned`/`AllSigned` and the file still carries the download mark. Run `Unblock-File`. |
+| `The term '.\Get-VncTargets.ps1' is not recognized` | Wrong folder. `cd` to where the file is; the leading `.\` is required. |
+| Window flashes and closes | Launched by double-clicking the `.ps1`. Use the `.cmd` launcher instead. |
+
+Only the *server* setup scripts need an elevated prompt. `Get-VncTargets.ps1`
+and `Test-VncOverTailscale.ps1` run as a normal user.
 
 ## Requirements
 
